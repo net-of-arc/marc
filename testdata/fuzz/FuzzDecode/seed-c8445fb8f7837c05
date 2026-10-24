@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Transport Layer Security\n\"@type\": Entity\n---\n# Transport Layer Security\n\nA cryptographic protocol.\n\nconformsTo:: [[RFC 8446]]\n")

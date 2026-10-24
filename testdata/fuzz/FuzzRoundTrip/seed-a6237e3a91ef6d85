@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Quoted Scalars\n\"@type\": Entity\nanswer: \"yes\"\npair: \"a: b\"\nplain: RFC 8446\n---\n# Quoted Scalars\n")

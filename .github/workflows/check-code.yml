@@ -1,0 +1,44 @@
+name: check
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+
+jobs:
+  code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.3"
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - uses: dominikh/staticcheck-action@v1.3.1
+        with:
+          install-go: false
+          version: "2026.2.2"
+
+      - name: go mod tidy
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+
+      - name: apidiff
+        run: |
+          if ! base=$(git describe --tags --abbrev=0 2>/dev/null); then
+            echo "no release tag, apidiff skipped"
+            exit 0
+          fi
+          go install golang.org/x/exp/cmd/apidiff@v0.0.0-20261014143641-f0251eb4aa3e
+          git worktree add /tmp/apidiff-base "$base"
+          out=$(apidiff -m -incompatible /tmp/apidiff-base .)
+          echo "$out"
+          test -z "$out"

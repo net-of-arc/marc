@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Example Node\n\"@type\": Entity\n---\n# Example Node\n\nThe first paragraph, see [[RFC 8446]] for details.\nIt continues on a second line.\n\nThe second paragraph closes the introduction.\n\n**Key Findings**\nThe protocol removes legacy cipher suites.\n\n## Claims\n- claims:: Handshake latency drops to one round trip.\n- claims:: Static RSA key exchange is removed.\n")

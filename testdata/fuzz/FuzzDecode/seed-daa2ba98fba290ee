@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Many Meta\n\"@type\": Entity\naliases: [Only One]\ntags: [alpha, mu, zeta]\n---\n# Many Meta\n\nA single paragraph of default prose.\n")

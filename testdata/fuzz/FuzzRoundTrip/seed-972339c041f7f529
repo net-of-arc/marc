@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Literal Kinds\n\"@type\": Entity\napproved: true\ncount: 42\npublished: 2026-10-23\nratio: 1.5\nupdated: 2026-10-23T10:00:00Z\n---\n# Literal Kinds\n")

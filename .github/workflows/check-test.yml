@@ -1,0 +1,31 @@
+name: test
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+
+jobs:
+  unit:
+    strategy:
+      matrix:
+        go: ["1.26.6", "1.27.3"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: build
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: test
+        run: go test -race -coverprofile=profile.cov ./...
+
+      - uses: shogo82148/actions-goveralls@v1
+        if: matrix.go == '1.27.3'
+        continue-on-error: true
+        with:
+          path-to-profile: profile.cov
