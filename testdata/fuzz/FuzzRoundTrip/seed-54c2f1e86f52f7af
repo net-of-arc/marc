@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Transport Layer Security\n\"@type\": Entity\ncategory: script\n\"@provenance\":\n  dierks-2008-tls12:\n    category: [script]\n    text: [\"sha256:91ab03ce55f2a7d0\"]\n  rescorla-2018-tls13:\n    category: [script]\n    replaces: [\"[[SSL Protocol]]\"]\n    text: [\"sha256:4f1c2a9b0e7d3c18\"]\n---\n# Transport Layer Security\n")

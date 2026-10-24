@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": X\n\"@type\": Entity\nfirst: &a value\nsecond: *a\n---\n# X\n")

@@ -1,0 +1,57 @@
+name: build
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.3"
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test -race -coverprofile=profile.cov ./...
+
+      - uses: shogo82148/actions-goveralls@v1
+        continue-on-error: true
+        with:
+          path-to-profile: profile.cov
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      - name: increment
+        id: increment
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          case "$MESSAGE" in
+            *"[major]"*) echo "increment=major" >> "$GITHUB_OUTPUT" ;;
+            *"[minor]"*) echo "increment=minor" >> "$GITHUB_OUTPUT" ;;
+            *) echo "increment=patch" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: reecetech/version-increment@2023.10.2
+        id: version
+        with:
+          scheme: semver
+          increment: ${{ steps.increment.outputs.increment }}
+
+      - name: tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.v-version }}
+          git push origin ${{ steps.version.outputs.v-version }}

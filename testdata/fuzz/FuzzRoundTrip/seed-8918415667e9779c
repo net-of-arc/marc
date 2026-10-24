@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("---\n\"@id\": Transport Layer Security\n\"@type\": Entity\ncategory: script\n\"@conflicts\":\n  category: [object, process]\n  description:\n    - |\n      A protocol suite for securing transport connections, standardized by the IETF.\n  replaces: [\"[[SSL Version 3]]\"]\n---\n# Transport Layer Security\n")
