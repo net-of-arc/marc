@@ -89,6 +89,55 @@ func TestRoundTripUnknownPredicate(t *testing.T) {
 	}
 }
 
+func TestRoundTripColonLeadNormalizes(t *testing.T) {
+	// Scenario 4.5 from specs/001-markdown-triples-codec/spec.md: the
+	// tolerant "**Label**: text" lead normalizes to the canonical own-line
+	// form on re-encode.
+	t.Parallel()
+
+	n, err := marc.Unmarshal(fixture(t, "testdata/forms/inline-label.md"))
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Seq(slices.Collect(n.Values(marc.MustPredicate("note")))).Equal(marc.Text("This is a note.")),
+		it.Seq(slices.Collect(n.Values(marc.MustPredicate("text")))).Equal(marc.Text("**Important** results follow.")),
+	)
+
+	b, err := marc.Marshal(n)
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Equal(string(b), "---\n\"@id\": Inline Label\n\"@type\": Entity\n---\n# Inline Label\n\n**Important** results follow.\n\n**Note**\nThis is a note.\n"),
+	)
+}
+
+func TestRoundTripOrderWithinSection(t *testing.T) {
+	// SC-008 from specs/001-markdown-triples-codec/spec.md: the relative
+	// order of predicates sharing a role survives a round trip.
+	t.Parallel()
+
+	n, err := marc.NewNode(marc.MustID("X"), marc.MustClass("Entity"), slices.Values([]marc.Triple{
+		triple("X", "zLink", ref("B")),
+		triple("X", "aLink", ref("A")),
+		triple("X", "replaces", ref("B")),
+		triple("X", "conformsTo", ref("A")),
+	}))
+	it.Then(t).Must(it.Nil(err))
+	schema := marc.Properties{
+		marc.MustPredicate("zLink"):      {Role: marc.RoleLink},
+		marc.MustPredicate("aLink"):      {Role: marc.RoleLink},
+		marc.MustPredicate("replaces"):   {Role: marc.RoleEdge},
+		marc.MustPredicate("conformsTo"): {Role: marc.RoleEdge},
+	}
+
+	b, err := codec(t, schema).Marshal(n)
+	it.Then(t).Must(it.Nil(err))
+
+	m, err := marc.Unmarshal(b)
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Seq(slices.Collect(m.Predicates())).Equal(
+			marc.MustPredicate("replaces"), marc.MustPredicate("conformsTo"),
+			marc.MustPredicate("zLink"), marc.MustPredicate("aLink"),
+		),
+	)
+}
+
 func TestRoundTripEdgeForms(t *testing.T) {
 	// Scenario 3.4 from specs/001-markdown-triples-codec/spec.md
 	t.Parallel()

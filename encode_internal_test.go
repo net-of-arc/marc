@@ -92,9 +92,10 @@ func TestEncodeLayout(t *testing.T) {
 
 	b, err := marshal(t, schema, n)
 
+	// BUG-001: sections follow the triples' insertion order, not a sort.
 	it.Then(t).Must(it.Nil(err)).Should(it.Equal(b, head+"count: 3\n---\n# X\n\nProse.\n\n**Notes**\nNotes.\n\n"+
-		"- conformsTo:: [[A|a]]\n- conformsTo:: [[Z]]\n- replaces:: [[B]]\n\n"+
-		"## Alpha\n- aLink:: [[A]]\n\n## Claims\n- claims:: first\n- claims:: second\n\n## Z Link\n- zLink:: [[B]]\n"))
+		"- replaces:: [[B]]\n- conformsTo:: [[Z]]\n- conformsTo:: [[A|a]]\n\n"+
+		"## Z Link\n- zLink:: [[B]]\n\n## Alpha\n- aLink:: [[A]]\n\n## Claims\n- claims:: second\n- claims:: first\n"))
 }
 
 func TestEncodeSpillsToMeta(t *testing.T) {
@@ -112,8 +113,9 @@ func TestEncodeSpillsToMeta(t *testing.T) {
 
 	b, err := marshal(t, schema, n)
 
+	// BUG-001: meta spillovers keep the triples' insertion order.
 	it.Then(t).Must(it.Nil(err)).Should(it.Equal(b, head+
-		"claims: \"multi\\nline\"\nreplaces: 1\ntext: \"\\nleading blank line\"\n---\n# X\n\n- replaces:: [[Y]]\n"))
+		"replaces: 1\ntext: \"\\nleading blank line\"\nclaims: \"multi\\nline\"\n---\n# X\n\n- replaces:: [[Y]]\n"))
 }
 
 func TestEncodeZeroNode(t *testing.T) {
@@ -129,6 +131,8 @@ func TestEncodeProseStructure(t *testing.T) {
 		"a\n- p::x":               true,
 		"a\nconformsTo:: [[Y]]":   true,
 		"a\n**Label**\nb":         true,
+		"a\n**Note**: continued":  true,
+		"**Note**: continued":     true,
 		"a\n```\nunterminated":    true,
 		"a\n```\n# Title\n```\nb": false,
 		"a\n~~~\n- p:: x\n~~~":    false,

@@ -79,24 +79,28 @@ func (g generator) literal() marc.Object {
 	return marc.Text(g.word("ab Z09:#,-[]{}\"'\\|>!&*%@`~?.+<=\t\n\u00a0é🙂", 16))
 }
 
-func (g generator) prose() marc.Object {
-	paragraphs := make([]string, 1+g.IntN(3))
-	for i := range paragraphs {
-		paragraphs[i] = g.words(6) + "\n" + g.words(6) + " [[" + g.id().String() + "]]."
-	}
-	return marc.Text(strings.Join(paragraphs, "\n\n"))
+// paragraph returns one single-line prose paragraph carrying an untyped
+// link (BUG-001: a text predicate's values are one paragraph each, not one
+// blob of several paragraphs joined by a blank line).
+func (g generator) paragraph() marc.Object {
+	return marc.Text(g.words(6) + "\n" + g.words(6) + " [[" + g.id().String() + "]].")
 }
 
 func (g generator) values(prop marc.Property) []marc.Object {
+	if prop.Role == marc.RoleText && !prop.Many {
+		values := make([]marc.Object, 1+g.IntN(3))
+		for i := range values {
+			values[i] = g.paragraph()
+		}
+		return values
+	}
 	values := make([]marc.Object, 1+g.IntN(3))
 	for i := range values {
 		switch {
 		case prop.Role == marc.RoleEdge || prop.Role == marc.RoleLink:
 			values[i] = g.ref()
-		case prop.Role == marc.RoleText && prop.Many:
-			values[i] = marc.Text(g.words(5))
 		case prop.Role == marc.RoleText:
-			return []marc.Object{g.prose()}
+			values[i] = marc.Text(g.words(5))
 		default:
 			values[i] = g.literal()
 		}
@@ -123,7 +127,10 @@ func (g generator) property() marc.Property {
 func (g generator) node() (marc.Node, marc.Properties, error) {
 	id := g.id()
 	schema := marc.Properties{marc.MustPredicate("text"): {Role: marc.RoleText, Default: true}}
-	triples := []marc.Triple{{Subject: id, Predicate: marc.MustPredicate("text"), Object: g.prose()}}
+	var triples []marc.Triple
+	for range 1 + g.IntN(3) {
+		triples = append(triples, marc.Triple{Subject: id, Predicate: marc.MustPredicate("text"), Object: g.paragraph()})
+	}
 	for range g.IntN(8) {
 		p, prop := g.predicate(), g.property()
 		if _, exists := schema[p]; exists {
@@ -139,7 +146,11 @@ func (g generator) node() (marc.Node, marc.Properties, error) {
 }
 
 func TestRoundTripGenerated(t *testing.T) {
-	// Scenario 3.2 from specs/001-markdown-triples-codec/spec.md (SC-002)
+	// Scenario 3.2 from specs/001-markdown-triples-codec/spec.md (SC-002, SC-008).
+	// BUG-001: a node built with triples in arbitrary cross-role order is
+	// compared as a bag (CORE §4 forces meta before text before edge before
+	// link on encode); per-predicate value order is still exact, since it
+	// never crosses a section boundary.
 	t.Parallel()
 
 	g := generator{rand.New(rand.NewPCG(2026, 10))}
@@ -152,9 +163,18 @@ func TestRoundTripGenerated(t *testing.T) {
 		it.Then(t).Must(it.Nil(err))
 
 		m, err := c.Unmarshal(b)
-		it.Then(t).Must(it.Nil(err)).Should(
-			it.Equal(m.ID(), n.ID()),
-			it.Seq(slices.Collect(m.Triples())).Equal(slices.Collect(n.Triples())...),
-		)
+		it.Then(t).Must(it.Nil(err), it.Equal(m.ID(), n.ID()))
+		assertSameBag(t, m, n)
+	}
+}
+
+func assertSameBag(t *testing.T, m, n marc.Node) {
+	t.Helper()
+	mp, np := slices.Collect(m.Predicates()), slices.Collect(n.Predicates())
+	slices.SortFunc(mp, func(a, b marc.Predicate) int { return strings.Compare(a.String(), b.String()) })
+	slices.SortFunc(np, func(a, b marc.Predicate) int { return strings.Compare(a.String(), b.String()) })
+	it.Then(t).Should(it.Seq(mp).Equal(np...))
+	for _, p := range np {
+		it.Then(t).Should(it.Seq(slices.Collect(m.Values(p))).Equal(slices.Collect(n.Values(p))...))
 	}
 }

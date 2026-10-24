@@ -6,6 +6,8 @@
 
 **Status**: Draft
 
+**Bugfix**: 2026-10-24 — BUG-001 Text values are per paragraph, inline `**Label**:` paragraphs are labelled text, order is natural (document/insertion order within the CORE §4 sections), and untyped links are exposed as a derived view (not triples)
+
 **Input**: User description: "The library is pure Markdown to/from subject-predicate-object triples codec. The markdown format is governed by https://github.com/net-of-arc/arcnet-spec/blob/main/spec/CORE.md . Implement the core types to be used as a public interface between the client application and this library so that client operates with Markdown files as bag of triples."
 
 ## Context
@@ -33,6 +35,7 @@ A client developer hands the library the content of one Markdown node file and r
 3. **Given** a decoded node, **When** the client asks for the values of predicate `replaces`, **Then** it receives the single object `SSL Protocol`, identified as a reference to another node rather than a literal.
 4. **Given** a decoded node, **When** the client asks for the values of a predicate the node does not carry, **Then** it receives an empty result, not an error.
 5. **Given** a node with a front-matter value that is a number, a boolean, a date or a datetime, **When** the client decodes it, **Then** the corresponding object reports its literal kind (number, boolean, date, datetime) along with its exact written form.
+6. **Given** a node whose front-matter holds `tags: [zeta, alpha]` and whose edge block lists `replaces` before `conformsTo`, **When** the client decodes it, **Then** `Triples()` yields the front-matter triples, then the text triples, then the edge triples, then the link triples, and within each section in the order they are written (`tags "zeta"` before `tags "alpha"`, `replaces` before `conformsTo`); `Predicates()` and `Values()` follow the same order. *(BUG-001)*
 
 ---
 
@@ -47,11 +50,12 @@ A client developer builds a node in memory — a subject, a type, and a set of t
 **Acceptance Scenarios**:
 
 1. **Given** the CORE §3 triples and their roles, **When** the client encodes the node, **Then** the output is the CORE §3 example file in canonical form, with `"@id"` and `"@type"` written as quoted front-matter keys.
-2. **Given** a node with a multi-valued predicate whose values were added in the order `zeta, alpha, mu`, **When** the client encodes it, **Then** the values are written in lexicographic order `alpha, mu, zeta`, so that independent writers produce identical files.
+2. ~~**Given** a node with a multi-valued predicate whose values were added in the order `zeta, alpha, mu`, **When** the client encodes it, **Then** the values are written in lexicographic order `alpha, mu, zeta`, so that independent writers produce identical files.~~ *(superseded by BUG-001: CORE §3 asks only for a stable order; the natural order is the stable order)* **Given** a node with a multi-valued predicate whose values were added in the order `zeta, alpha, mu`, **When** the client encodes it, **Then** the values are written in the order they were added, `zeta, alpha, mu`, and encoding the same node again yields identical bytes.
 3. **Given** a link-role predicate `mentionedIn` with no declared label, **When** the client encodes the node, **Then** its block heading is `## Mentioned In` (camelCase split and capitalized) and each target is written as `- mentionedIn:: [[Target]]`.
 4. **Given** a link-role predicate that declares the label `Sources`, **When** the client encodes the node, **Then** its block heading is `## Sources`.
 5. **Given** a text-role predicate that is not the default text, **When** the client encodes the node, **Then** it appears as a bold `**Label**` line followed by its paragraph, after the default prose and before the edge block.
 6. **Given** a node with no triples beyond its subject and type, **When** the client encodes it, **Then** the output contains front-matter with `"@id"` and `"@type"` and an H1 title, and nothing else.
+7. **Given** a node whose default text predicate holds the values `abc` and `def` (added in that order) and whose labelled text predicate `note` holds two values, **When** the client encodes it, **Then** the default prose is written as the paragraphs `abc` and `def` separated by a blank line, followed by `**Note**` on its own line and its two paragraphs; the sections still follow CORE §4 (meta → text → edge → link) whatever order the triples were added in. *(BUG-001)*
 
 ---
 
@@ -66,7 +70,7 @@ A client developer relies on the guarantee that decoding and re-encoding preserv
 **Acceptance Scenarios**:
 
 1. **Given** any canonical node file, **When** the client decodes it and encodes the result without supplying any role information, **Then** the output is byte-identical to the input.
-2. **Given** any bag of triples with roles for each predicate, **When** the client encodes and then decodes it, **Then** the resulting bag equals the original as a set of triples.
+2. **Given** any bag of triples with roles for each predicate, **When** the client encodes and then decodes it, **Then** the resulting bag equals the original as a set of triples, and within each CORE §4 section the triples keep their original relative order. *(order clause: BUG-001)*
 3. **Given** a node containing a predicate unknown to the client, **When** the client decodes and re-encodes it, **Then** the unknown predicate is written back in the same position (front-matter, labelled prose, edge block or link block) it was found in.
 4. **Given** a non-canonical file using the body form `conformsTo:: [[RFC 8446]]` or the inline form `[supports:: [[RFC 8446]]]`, **When** the client decodes it, **Then** each yields a triple identical to the one the list form would yield, and re-encoding writes the list form.
 
@@ -82,9 +86,11 @@ A client developer reads prose predicates as text values that keep their untyped
 
 **Acceptance Scenarios**:
 
-1. **Given** default prose containing an untyped link `[[RFC 8446]]`, **When** the client decodes the node, **Then** the bag holds one text triple whose value contains `[[RFC 8446]]` verbatim, and no triple whose object is a reference to `RFC 8446` arises from that prose.
-2. **Given** default prose spanning several paragraphs, **When** the client decodes and re-encodes the node, **Then** the paragraphs and their order are preserved.
+1. **Given** default prose containing an untyped link `[[RFC 8446]]`, **When** the client decodes the node, **Then** the bag holds ~~one text triple whose value contains~~ a text triple for the paragraph that contains `[[RFC 8446]]` verbatim, and no triple whose object is a reference to `RFC 8446` arises from that prose. *(BUG-001: one triple per paragraph)*
+2. **Given** default prose spanning several paragraphs, **When** the client decodes ~~and re-encodes~~ the node, **Then** ~~the paragraphs and their order are preserved~~ each paragraph is a separate text triple, yielded in document order, and re-encoding reproduces the paragraphs in that order. *(BUG-001: was one value holding all paragraphs)*
 3. **Given** a text-role predicate whose values are a list of statements (a `## Label` block of `predicate:: statement` bullets), **When** the client decodes it, **Then** each bullet becomes one text triple.
+4. **Given** default prose containing the untyped links `[[RFC 8446]]` and `[[SSL Protocol|SSL]]` and the inline typed edge `[supports:: [[RFC 5246]]]`, **When** the client asks the node for its untyped links, **Then** it receives `(text, RFC 8446)` and `(text, SSL Protocol)` in document order, the bag still holds no triple for them, and `supports → RFC 5246` is a triple and is not listed among the untyped links. *(BUG-001)*
+5. **Given** a paragraph `**Note**: This is a note.`, **When** the client decodes the node, **Then** the bag holds the text triple `note "This is a note."` with the role of labelled text, exactly as for `**Note**` on its own line followed by `This is a note.`; a paragraph `**Note** This is a note.` (no colon) stays part of the surrounding prose; re-encoding writes `**Note**` on its own line. *(BUG-001)*
 
 ---
 
@@ -136,6 +142,11 @@ A client developer reading graph nodes that carry `"@conflicts"` or `"@provenanc
 - Fenced code blocks inside prose containing lines that look like headings or `predicate::` bullets: treated as prose, not structure.
 - Unicode subjects that differ only by normalization form: treated as the same subject after NFC normalization.
 - An empty bag passed with an empty subject: rejected at construction, since every node needs a valid subject and type.
+- Paragraph boundaries are blank lines outside fenced code: a fenced code block with blank lines inside it stays within one paragraph value. *(BUG-001)*
+- A text value that cannot be written as one paragraph (it contains a blank line outside fenced code) is not body-renderable and moves to front-matter like any other value its role cannot render; a paragraph value whose first line begins with `**Label**:` would be re-read as a label and is refused with the prose-structure error. *(BUG-001)*
+- Paragraphs following a `**Label**` line (or a `**Label**:` paragraph) belong to that label until the next label or structural element. *(BUG-001)*
+- The same untyped link written twice in the text of one predicate is listed once, at its first occurrence; untyped links inside fenced code are not listed. *(BUG-001)*
+- Merge-state keywords (`@conflicts`, `@provenance`) are not attributes and keep their canonical order (CORE §8.5). *(BUG-001)*
 
 ## Requirements *(mandatory)*
 
@@ -149,14 +160,15 @@ A client developer reading graph nodes that carry `"@conflicts"` or `"@provenanc
 - **FR-004**: The library MUST expose an **object** that is exactly one of: a *literal* (with its kind — text, number, boolean, date, datetime — and its exact written form) or a *reference* to another node's identity (with optional, presentation-only display text).
 - **FR-005**: The library MUST expose a **node** as a subject identity, a class, a set of triples about that subject, and optional merge-state keywords (`@conflicts`, `@provenance`). `@id`, `@type`, `@conflicts` and `@provenance` MUST NOT appear as triples.
 - **FR-006**: A node's triples MUST behave as a **set**: adding an equal triple twice yields one triple. Equality follows CORE §8.5 — literals by trimmed NFC text (dates/datetimes by value), references by target identity ignoring display text, prose after whitespace normalization.
-- **FR-007**: Clients MUST be able to enumerate all triples of a node, enumerate the predicates in use, and retrieve all objects of a given predicate. Enumeration order MUST be deterministic (canonical order, CORE §8.5).
+- **FR-007**: Clients MUST be able to enumerate all triples of a node, enumerate the predicates in use, and retrieve all objects of a given predicate. Enumeration order MUST be deterministic ~~(canonical order, CORE §8.5)~~ and natural: the order in which triples entered the node — document order for a decoded node (meta → text → edge → link, as written within each section), insertion order for a node built in memory. A duplicate triple keeps the position of its first occurrence; predicates are ordered by their first triple. *(BUG-001)*
 - **FR-008**: The library MUST expose the four predicate **roles** — meta, text, edge, link — plus, per predicate, an optional display label and, for text, whether it is the class's default text and whether its values are a list of statements.
 
 **Decoding (Markdown → triples)**
 
-- **FR-009**: The library MUST decode one Markdown node file into a node, mapping front-matter keys to meta triples, unlabelled prose to the default-text predicate, bold-labelled prose to its predicate, edge bullets (list, body and inline forms) to reference triples, and `## Label` blocks to the triples of the bullets they contain.
+- **FR-009**: The library MUST decode one Markdown node file into a node, mapping front-matter keys to meta triples, unlabelled prose to the default-text predicate, bold-labelled prose to its predicate, edge bullets (list, body and inline forms) to reference triples, and `## Label` blocks to the triples of the bullets they contain. Each prose paragraph MUST become its own text triple. A paragraph that begins with `**Label**:` MUST be decoded as labelled prose of that label's predicate, with the text after the colon as its first paragraph; a bold lead without a colon stays prose. *(paragraph and colon-label clauses: BUG-001)*
 - **FR-010**: Decoding MUST record, for every predicate found, the role and label implied by the position it was found in, so that the node can be re-encoded without external role information.
 - **FR-011**: Decoding MUST NOT produce triples from untyped links inside prose; the links stay inside the text value verbatim.
+- **FR-026**: The library MUST expose, as a derived read-only view of a node and not as triples, the untyped links (`[[Target]]`, `[[Target|text]]`, CORE §7) found in its text values, each paired with the predicate of the text value that carries it, in node order, once per predicate and target, excluding fenced code and inline typed edges. *(BUG-001)*
 - **FR-012**: Decoding MUST preserve every predicate, including predicates unknown to the client.
 - **FR-013**: The predicate name used for unlabelled default prose MUST be configurable by the client; when not configured it defaults to `text`.
 - **FR-014**: Decoding MUST reject: missing or unparseable front-matter, missing `"@id"` or `"@type"`, H1 not equal to `"@id"`, invalid identities or names, nested front-matter maps other than the merge-state keywords — each with a distinct, matchable error category.
@@ -164,17 +176,17 @@ A client developer reading graph nodes that carry `"@conflicts"` or `"@provenanc
 
 **Encoding (triples → Markdown)**
 
-- **FR-016**: The library MUST encode a node into a Markdown file laid out per CORE §4: front-matter (quoted `@`-keys, then meta predicates), H1 title equal to the subject, default prose, labelled prose, one heterogeneous edge block in list form, then one `## Label` block per link-role predicate and per list-of-statements text predicate.
+- **FR-016**: The library MUST encode a node into a Markdown file laid out per CORE §4: front-matter (quoted `@`-keys, then meta predicates), H1 title equal to the subject, default prose, labelled prose, one heterogeneous edge block in list form, then one `## Label` block per link-role predicate and per list-of-statements text predicate. Each value of a text predicate is written as one paragraph; a labelled text predicate is written as its `**Label**` line followed by its paragraphs. *(paragraph clause: BUG-001)*
 - **FR-017**: The client MUST be able to supply role information for predicates at encode time; for predicates without client-supplied roles, the library MUST use the role recorded at decode time; for predicates with neither, it MUST default to meta for literals and edge for references.
-- **FR-018**: Encoding MUST produce canonical form: values of multi-valued predicates in lexicographic order of their canonical rendering (dates by value), edges in list form, deterministic ordering of predicates within each block, so two encodings of equal nodes are byte-identical.
+- **FR-018**: Encoding MUST produce canonical form: ~~values of multi-valued predicates in lexicographic order of their canonical rendering (dates by value)~~ predicates and their values written in node order (FR-007) within each CORE §4 section, edges in list form, ~~deterministic ordering of predicates within each block~~, so two encodings of ~~equal nodes~~ the same node, or of equal nodes whose triples entered in the same order, are byte-identical. *(BUG-001: CORE §3 requires only a stable order)*
 - **FR-019**: When a predicate has no declared label, encoding MUST derive it by splitting the predicate name at camelCase boundaries and capitalizing each word.
-- **FR-020**: Encoding MUST refuse prose values containing ATX heading lines or lines beginning with a `predicate::` bullet (outside fenced code), returning a matchable error.
+- **FR-020**: Encoding MUST refuse prose values containing ATX heading lines or lines beginning with a `predicate::` bullet (outside fenced code), or beginning with a `**Label**:` lead, returning a matchable error. *(`**Label**:` clause: BUG-001)*
 - **FR-021**: Encoding MUST write `@conflicts` and `@provenance`, when present, back into front-matter as quoted keys in canonical order.
 
 **Round trip & robustness**
 
 - **FR-022**: For every canonical node file, decode followed by encode (with no client role information) MUST reproduce the file byte-for-byte.
-- **FR-023**: For every valid node, encode followed by decode MUST reproduce an equal node (same subject, class, triple set and merge-state keywords).
+- **FR-023**: For every valid node, encode followed by decode MUST reproduce an equal node (same subject, class, triple set and merge-state keywords), with the relative order of triples within each CORE §4 section preserved. *(order clause: BUG-001)*
 - **FR-024**: The library MUST NOT crash on any input; every failure MUST be reported as a returned error whose category the client can test for without inspecting message text.
 - **FR-025**: Decoding and encoding MUST be free of side effects: no filesystem, network, environment or global state access; the client supplies the input stream and output destination.
 
@@ -188,6 +200,8 @@ A client developer reading graph nodes that carry `"@conflicts"` or `"@provenanc
 - **Node (Bag)**: one Markdown file seen as data — subject, class, set of triples, optional merge-state keywords, and the observed placement of each predicate.
 - **Role**: where a predicate renders — `meta`, `text`, `edge`, `link` — with optional label and text sub-attributes (default text, list of statements).
 - **Merge-state keywords**: `@conflicts` (predicate → open alternatives) and `@provenance` (document → predicate → values); carried beside triples, never as triples.
+- **Untyped link**: a bare `[[Target]]` inside a text value; part of that value, never a triple, exposed as a derived view (FR-026). *(BUG-001)*
+- **Paragraph**: the unit of a prose text value; one paragraph, one triple. *(BUG-001)*
 
 ## Success Criteria *(mandatory)*
 
@@ -200,6 +214,7 @@ A client developer reading graph nodes that carry `"@conflicts"` or `"@provenanc
 - **SC-005**: Every malformed-input category in User Story 5 is distinguishable by the client without reading error message text (100% of categories testable by category).
 - **SC-006**: Decoding a typical node file (≤ 10 KB, ≤ 100 statements) completes in under 1 millisecond on commodity hardware, so a graph of 10,000 nodes can be read in seconds.
 - **SC-007**: Every acceptance scenario in this specification has a passing automated test exercising only the library's public surface.
+- **SC-008**: For 100% of the generated round-trip corpus (SC-002), the relative order of triples within each CORE §4 section survives triples → Markdown → triples. *(BUG-001)*
 
 ## Assumptions
 
@@ -208,6 +223,8 @@ A client developer reading graph nodes that carry `"@conflicts"` or `"@provenanc
 - **Merge-state keywords are carried, not interpreted.** `@conflicts` and `@provenance` are decoded into structured data and written back, but the library applies no merge semantics and does not validate them against candidate sets.
 - **Literal kinds** are inferred from the front-matter scalar as written (text, number, boolean, date, datetime); prose and statement values are text. Universal timestamps (creation/modification time) are ordinary meta predicates with datetime literals.
 - **Default text predicate** is named `text` unless the client configures otherwise, matching the CORE §3 illustration.
+- **Inline bold labels** are recognised only with a colon (`**Note**: text`); the decoder does not consult the schema to decide whether a bold lead is a label. *(BUG-001)*
+- **Natural order** satisfies CORE §3: the written order of values "carries no meaning" and a producer "SHOULD write them in a stable order"; document/insertion order is that stable order. Lexicographic order is not imposed. *(BUG-001)*
 - **Bold-label → predicate mapping on decode**: a bold `**Label**` paragraph maps to the predicate whose label it is when the client supplies one; otherwise to the camelCase join of the label words (`**Key Findings**` → `keyFindings`).
 - **Display text** of edges is retained for presentation but is not part of triple equality (CORE §7).
 - **File basename vs. `@id`**: the library receives content, not paths; checking that the basename matches `@id` is left to the client.

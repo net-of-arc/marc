@@ -59,9 +59,11 @@ func TestScanBodyTitle(t *testing.T) {
 }
 
 func TestScanBodyDefaultProse(t *testing.T) {
+	// BUG-001: each paragraph is its own Text value.
 	entries := scan(t, "# X\n\nFirst line\nsecond line.\n\nSecond paragraph.\n", nil)
 	it.Then(t).Should(it.Seq(entries).Equal(
-		textEntry("text", defaultProse, "First line\nsecond line.\n\nSecond paragraph."),
+		textEntry("text", defaultProse, "First line\nsecond line."),
+		textEntry("text", defaultProse, "Second paragraph."),
 	))
 }
 
@@ -134,10 +136,23 @@ func TestScanBodyUntypedLinks(t *testing.T) {
 }
 
 func TestScanBodyFencedProse(t *testing.T) {
+	// BUG-001: a blank line outside a fence still separates paragraphs, even
+	// when the next paragraph is itself a fenced block; a blank line inside
+	// a fence does not split.
 	body := "# X\n\nIntro.\n\n```markdown\n# Not a title\n## Not a block\n- p:: [[Not]]\n**Not**\n```\n\n~~~\n- q:: x\n~~~\n"
 	entries := scan(t, body, nil)
 	it.Then(t).Should(it.Seq(entries).Equal(
-		textEntry("text", defaultProse, "Intro.\n\n```markdown\n# Not a title\n## Not a block\n- p:: [[Not]]\n**Not**\n```\n\n~~~\n- q:: x\n~~~"),
+		textEntry("text", defaultProse, "Intro."),
+		textEntry("text", defaultProse, "```markdown\n# Not a title\n## Not a block\n- p:: [[Not]]\n**Not**\n```"),
+		textEntry("text", defaultProse, "~~~\n- q:: x\n~~~"),
+	))
+}
+
+func TestScanBodyFenceKeepsInternalBlankLine(t *testing.T) {
+	body := "# X\n\n```\nfirst\n\nsecond\n```\n"
+	entries := scan(t, body, nil)
+	it.Then(t).Should(it.Seq(entries).Equal(
+		textEntry("text", defaultProse, "```\nfirst\n\nsecond\n```"),
 	))
 }
 
@@ -152,10 +167,14 @@ func TestScanBodyStatements(t *testing.T) {
 }
 
 func TestScanBodyLabelledProse(t *testing.T) {
+	// BUG-001: paragraphs after a label stay under it, one Text each, until
+	// the next label or structural element.
 	entries := scan(t, "# X\n\nDefault.\n\n**Key Findings**\nFirst line\nsecond line.\n\nMore.\n\n**Key findings**\nAgain.\n", nil)
+	keyFindings := Property{Role: RoleText}
 	it.Then(t).Should(it.Seq(entries).Equal(
 		textEntry("text", defaultProse, "Default."),
-		textEntry("keyFindings", Property{Role: RoleText}, "First line\nsecond line.\n\nMore."),
+		textEntry("keyFindings", keyFindings, "First line\nsecond line."),
+		textEntry("keyFindings", keyFindings, "More."),
 		textEntry("keyFindings", Property{Role: RoleText, Label: "Key findings"}, "Again."),
 	))
 }
@@ -174,6 +193,30 @@ func TestScanBodyLabelFromSchema(t *testing.T) {
 	entries := scan(t, "# X\n\n**Summary Notes**\nText.\n", labelSchema{})
 	it.Then(t).Should(it.Seq(entries).Equal(
 		textEntry("notes", Property{Role: RoleText, Label: "Summary Notes"}, "Text."),
+	))
+}
+
+func TestScanBodyColonLead(t *testing.T) {
+	// BUG-001 Issue 2: "**Note**: text" is labelled prose, like "**Note**"
+	// on its own line followed by the paragraph.
+	entries := scan(t, "# X\n\n**Note**: This is a note.\n", nil)
+	it.Then(t).Should(it.Seq(entries).Equal(
+		textEntry("note", Property{Role: RoleText}, "This is a note."),
+	))
+}
+
+func TestScanBodyColonLeadWithoutColonStaysProse(t *testing.T) {
+	entries := scan(t, "# X\n\n**Important** results follow.\n", nil)
+	it.Then(t).Should(it.Seq(entries).Equal(
+		textEntry("text", defaultProse, "**Important** results follow."),
+	))
+}
+
+func TestScanBodyColonLeadInlineEdge(t *testing.T) {
+	entries := scan(t, "# X\n\n**Note**: see [supports:: [[RFC 8446]]] here.\n", nil)
+	it.Then(t).Should(it.Seq(entries).Equal(
+		textEntry("note", Property{Role: RoleText}, "see [supports:: [[RFC 8446]]] here."),
+		refEntry("supports", edgeProperty, "RFC 8446"),
 	))
 }
 

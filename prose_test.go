@@ -10,7 +10,6 @@ package marc_test
 
 import (
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/fogfish/it/v2"
@@ -26,15 +25,17 @@ func proseNode(t *testing.T) marc.Node {
 	return n
 }
 
-func defaultText(n marc.Node) string {
+func defaultTexts(n marc.Node) []string {
+	var out []string
 	for o := range n.Values(marc.MustPredicate("text")) {
-		return o.String()
+		out = append(out, o.String())
 	}
-	return ""
+	return out
 }
 
 func TestProseUntypedLink(t *testing.T) {
-	// Scenario 4.1 from specs/001-markdown-triples-codec/spec.md
+	// Scenario 4.1 from specs/001-markdown-triples-codec/spec.md (BUG-001:
+	// one text triple per paragraph)
 	t.Parallel()
 
 	n := proseNode(t)
@@ -46,18 +47,19 @@ func TestProseUntypedLink(t *testing.T) {
 	}
 
 	it.Then(t).Should(
-		it.String(defaultText(n)).Contain("see [[RFC 8446]] for details"),
+		it.String(defaultTexts(n)[0]).Contain("see [[RFC 8446]] for details"),
 		it.Equal(link, 0),
 	)
 }
 
 func TestProseParagraphs(t *testing.T) {
-	// Scenario 4.2 from specs/001-markdown-triples-codec/spec.md
+	// Scenario 4.2 from specs/001-markdown-triples-codec/spec.md (BUG-001:
+	// each paragraph is its own Text value, in document order)
 	t.Parallel()
 
 	src := fixture(t, "testdata/prose-untyped-links.md")
 	n := proseNode(t)
-	paragraphs := strings.Split(defaultText(n), "\n\n")
+	paragraphs := defaultTexts(n)
 
 	b, err := marc.Marshal(n)
 
@@ -66,6 +68,40 @@ func TestProseParagraphs(t *testing.T) {
 		it.String(paragraphs[0]).HaveSuffix("It continues on a second line."),
 		it.Equal(paragraphs[1], "The second paragraph closes the introduction."),
 		it.Equal(string(b), string(src)),
+	)
+}
+
+func TestProseLinks(t *testing.T) {
+	// Scenario 4.4 from specs/001-markdown-triples-codec/spec.md
+	t.Parallel()
+
+	n := proseNode(t)
+	var got []struct {
+		Predicate marc.Predicate
+		Target    string
+	}
+	for p, r := range n.Links() {
+		got = append(got, struct {
+			Predicate marc.Predicate
+			Target    string
+		}{p, r.Target().String()})
+	}
+
+	it.Then(t).Should(it.Equal(len(got), 1), it.Equal(got[0].Predicate.String(), "text"), it.Equal(got[0].Target, "RFC 8446"))
+}
+
+func TestProseColonLead(t *testing.T) {
+	// Scenario 4.5 from specs/001-markdown-triples-codec/spec.md
+	t.Parallel()
+
+	n, err := marc.Unmarshal([]byte(
+		"---\n\"@id\": X\n\"@type\": Entity\n---\n# X\n\n**Note**: This is a note.\n"))
+	it.Then(t).Must(it.Nil(err))
+
+	b, err := marc.Marshal(n)
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Seq(slices.Collect(n.Values(marc.MustPredicate("note")))).Equal(marc.Text("This is a note.")),
+		it.Equal(string(b), "---\n\"@id\": X\n\"@type\": Entity\n---\n# X\n\n**Note**\nThis is a note.\n"),
 	)
 }
 

@@ -46,11 +46,11 @@ func ExampleDecode() {
 	// Output:
 	// Transport Layer Security a Entity
 	//   category script
-	//   conformsTo [[RFC 8446]]
-	//   mentionedIn [[rescorla-2026-tls13]]
-	//   replaces [[SSL Protocol]]
 	//   tags cryptography
 	//   text A cryptographic protocol that establishes an authenticated, confidential channel over an untrusted network.
+	//   conformsTo [[RFC 8446]]
+	//   replaces [[SSL Protocol]]
+	//   mentionedIn [[rescorla-2026-tls13]]
 }
 
 func ExampleSelect() {
@@ -67,8 +67,23 @@ func ExampleSelect() {
 
 	// Output:
 	// conformsTo → RFC 8446
-	// mentionedIn → rescorla-2026-tls13
 	// replaces → SSL Protocol
+	// mentionedIn → rescorla-2026-tls13
+}
+
+func ExampleNode_Links() {
+	node, err := marc.Unmarshal([]byte(
+		"---\n\"@id\": X\n\"@type\": Entity\n---\n# X\n\nSee [[RFC 8446]] for details.\n"))
+	if err != nil {
+		panic(err)
+	}
+
+	for p, ref := range node.Links() {
+		fmt.Printf("%s → %s\n", p, ref.Target())
+	}
+
+	// Output:
+	// text → RFC 8446
 }
 
 func ExampleEncode() {

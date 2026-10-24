@@ -20,11 +20,15 @@ import (
 // set of triples about the subject, the merge-state keywords "@conflicts" and
 // "@provenance", and the Property observed for each predicate while decoding.
 //
-// Triples form a set under CORE §8.5 equality; every iterator yields in
-// canonical order (predicates by code point, then values by variant and
-// value). The zero Node is invalid: it has no triples and the encoder rejects
-// it with ErrMalformed. Node is immutable and safe for concurrent use; its
-// iterators read shared state, never mutate it, and yield immutable values.
+// Triples form a set under CORE §8.5 equality; Triples, Predicates and Values
+// yield in natural order — the order triples entered the node (document
+// order for a decoded node, the sequence order given to NewNode otherwise),
+// with a duplicate keeping the position of its first occurrence. Conflicts
+// and Provenance keep canonical order (CORE §8.5), since they are merge
+// state, not attributes. The zero Node is invalid: it has no triples and the
+// encoder rejects it with ErrMalformed. Node is immutable and safe for
+// concurrent use; its iterators read shared state, never mutate it, and yield
+// immutable values.
 type Node struct {
 	id         ID
 	class      Class
@@ -102,7 +106,7 @@ func (n Node) ID() ID { return n.id }
 // Class returns the "@type" of the node.
 func (n Node) Class() Class { return n.class }
 
-// Triples yields every triple of the node in canonical order.
+// Triples yields every triple of the node in natural order.
 func (n Node) Triples() iter.Seq[Triple] {
 	return func(yield func(Triple) bool) {
 		for _, set := range n.facts {
@@ -115,7 +119,8 @@ func (n Node) Triples() iter.Seq[Triple] {
 	}
 }
 
-// Predicates yields every predicate in use, in code-point order.
+// Predicates yields every predicate in use, in natural order: each one at
+// the position of its first triple.
 func (n Node) Predicates() iter.Seq[Predicate] {
 	return func(yield func(Predicate) bool) {
 		for _, set := range n.facts {
@@ -126,10 +131,40 @@ func (n Node) Predicates() iter.Seq[Predicate] {
 	}
 }
 
-// Values yields the objects of predicate p in canonical order; it yields
+// Values yields the objects of predicate p in natural order; it yields
 // nothing when the node does not carry p.
 func (n Node) Values(p Predicate) iter.Seq[Object] {
 	return slices.Values(lookup(n.facts, p))
+}
+
+// Links yields the untyped links ([[Target]] or [[Target|display]], CORE §7)
+// found in the node's Text values, each paired with the predicate of the
+// value that carries it, in natural order. A link inside fenced code, or
+// inside the typed inline form "[p:: [[T]]]", is not yielded. The same
+// (predicate, target) pair is yielded once, at its first occurrence. Links
+// are derived on demand and never appear as triples (FR-026).
+func (n Node) Links() iter.Seq2[Predicate, Ref] {
+	return func(yield func(Predicate, Ref) bool) {
+		seen := map[string]struct{}{}
+		for _, set := range n.facts {
+			for _, o := range set.values {
+				t, ok := o.(Text)
+				if !ok {
+					continue
+				}
+				for _, ref := range untypedLinks(string(t)) {
+					key := set.predicate.value + "\x00" + ref.target.value
+					if _, dup := seen[key]; dup {
+						continue
+					}
+					seen[key] = struct{}{}
+					if !yield(set.predicate, ref) {
+						return
+					}
+				}
+			}
+		}
+	}
 }
 
 // Property returns the Property observed for p while decoding: the role and
@@ -162,17 +197,17 @@ func (n Node) Provenance() iter.Seq[Attribution] {
 }
 
 func lookup(sets []valueSet, p Predicate) []Object {
-	i, ok := slices.BinarySearchFunc(sets, p, func(s valueSet, p Predicate) int {
-		return cmp.Compare(s.predicate.value, p.value)
-	})
-	if !ok {
-		return nil
+	for _, s := range sets {
+		if s.predicate == p {
+			return s.values
+		}
 	}
-	return sets[i].values
+	return nil
 }
 
 type builder struct {
 	sets     map[Predicate][]Object
+	order    []Predicate
 	seen     map[string]struct{}
 	observed map[Predicate]Property
 }
@@ -191,6 +226,9 @@ func (b *builder) add(p Predicate, o Object) bool {
 		return false
 	}
 	b.seen[k] = struct{}{}
+	if _, ok := b.sets[p]; !ok {
+		b.order = append(b.order, p)
+	}
 	b.sets[p] = append(b.sets[p], o)
 	return true
 }
@@ -201,9 +239,23 @@ func (b *builder) observe(p Predicate, prop Property) {
 	}
 }
 
+// valueSets returns the facts in natural order: each predicate at the
+// position of its first value, each predicate's values in the order they
+// were added.
 func (b *builder) valueSets() []valueSet {
-	sets := make([]valueSet, 0, len(b.sets))
-	for p, values := range b.sets {
+	sets := make([]valueSet, 0, len(b.order))
+	for _, p := range b.order {
+		sets = append(sets, valueSet{predicate: p, values: b.sets[p]})
+	}
+	return sets
+}
+
+// canonicalValueSets returns the facts in CORE §8.5 canonical order. It is
+// used for merge-state keywords ("@conflicts"), never for triples.
+func (b *builder) canonicalValueSets() []valueSet {
+	sets := make([]valueSet, 0, len(b.order))
+	for _, p := range b.order {
+		values := slices.Clone(b.sets[p])
 		slices.SortFunc(values, compareObjects)
 		sets = append(sets, valueSet{predicate: p, values: values})
 	}

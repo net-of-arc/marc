@@ -25,15 +25,21 @@ type scope struct {
 
 type scanner struct {
 	scope
-	entries []entry
-	prose   map[int][]string
-	target  int
-	fence   string
-	inBlock bool
-	heading string
+	entries   []entry
+	prose     map[int][]string
+	target    int
+	predicate Predicate
+	textProp  Property
+	active    bool
+	fence     string
+	inBlock   bool
+	heading   string
 }
 
-var inlineEdge = regexp.MustCompile(`\[([a-z][A-Za-z0-9]*)::\s*(\[\[[^\[\]]*\]\])\]`)
+var (
+	inlineEdge    = regexp.MustCompile(`\[([a-z][A-Za-z0-9]*)::\s*(\[\[[^\[\]]*\]\])\]`)
+	untypedLinkRe = regexp.MustCompile(`\[\[[^\[\]]*\]\]`)
+)
 
 func scanBody(body string, sc scope) ([]entry, error) {
 	lines := strings.Split(body, "\n")
@@ -124,20 +130,81 @@ func (s *scanner) bodyLine(lines []string, i int) error {
 		return nil
 	}
 	if heading, ok := headingOf(line); ok {
+		s.closeParagraph()
+		s.active = false
 		s.inBlock, s.heading = true, heading
 		return nil
 	}
 	if p, value, ok := bullet(line); ok {
+		s.closeParagraph()
+		s.active = false
 		return s.edge(p, value, i)
 	}
 	if p, value, ok := bodyEdge(line); ok {
+		s.closeParagraph()
+		s.active = false
 		return s.edge(p, value, i)
 	}
-	if label, p, ok := s.label(line); ok {
-		s.labelled(label, p, lines, i)
+	if s.wholeLabel(lines, i) {
 		return nil
 	}
+	if label, rest, p, ok := s.leadLabel(line); ok {
+		s.openLabel(label, p)
+		if rest == "" {
+			return nil
+		}
+		return s.proseLine(rest)
+	}
 	return s.proseLine(line)
+}
+
+// wholeLabel recognises a line that is exactly "**Label**": a grouping
+// label when the next line is a bullet (ignored, carries no data, CORE §4),
+// otherwise the start of that label's text.
+func (s *scanner) wholeLabel(lines []string, i int) bool {
+	text, ok := labelText(lines[i])
+	if !ok {
+		return false
+	}
+	if i+1 < len(lines) {
+		if _, _, next := bullet(lines[i+1]); next {
+			return true
+		}
+	}
+	p, ok := s.resolveLabel(text)
+	if !ok {
+		return false
+	}
+	s.openLabel(text, p)
+	return true
+}
+
+// leadLabel recognises a paragraph lead "**Label**: rest" (BUG-001). A bold
+// lead without a colon is never a label, regardless of the schema.
+func (s *scanner) leadLabel(line string) (string, string, Predicate, bool) {
+	text, rest, ok := boldLeadText(line)
+	if !ok {
+		return "", "", Predicate{}, false
+	}
+	p, ok := s.resolveLabel(text)
+	return text, rest, p, ok
+}
+
+func (s *scanner) resolveLabel(text string) (Predicate, bool) {
+	if s.schema != nil {
+		if p, ok := s.schema.Predicate(s.class, text); ok && !p.IsZero() {
+			return p, true
+		}
+	}
+	return predicateOfLabel(text)
+}
+
+func (s *scanner) openLabel(label string, p Predicate) {
+	s.closeParagraph()
+	if label == p.Label() {
+		label = ""
+	}
+	s.predicate, s.textProp, s.active = p, Property{Role: RoleText, Label: label}, true
 }
 
 func (s *scanner) edge(p Predicate, value string, i int) error {
@@ -152,39 +219,14 @@ func (s *scanner) edge(p Predicate, value string, i int) error {
 	return nil
 }
 
-func (s *scanner) label(line string) (string, Predicate, bool) {
-	text, ok := labelText(line)
-	if !ok {
-		return "", Predicate{}, false
-	}
-	if s.schema != nil {
-		if p, ok := s.schema.Predicate(s.class, text); ok && !p.IsZero() {
-			return text, p, true
-		}
-	}
-	p, ok := predicateOfLabel(text)
-	return text, p, ok
-}
-
-func (s *scanner) labelled(label string, p Predicate, lines []string, i int) {
-	if i+1 < len(lines) {
-		if _, _, next := bullet(lines[i+1]); next {
-			return
-		}
-	}
-	if label == p.Label() {
-		label = ""
-	}
-	s.target = s.slot(p, Property{Role: RoleText, Label: label})
-}
-
 func (s *scanner) slot(p Predicate, prop Property) int {
 	s.entries = append(s.entries, entry{predicate: p, property: prop})
 	return len(s.entries) - 1
 }
 
 func (s *scanner) proseLine(line string) error {
-	if s.target < 0 && strings.TrimSpace(line) == "" {
+	if strings.TrimSpace(line) == "" {
+		s.closeParagraph()
 		return nil
 	}
 	s.appendProse(line)
@@ -198,11 +240,31 @@ func (s *scanner) proseLine(line string) error {
 	return nil
 }
 
+// appendProse feeds one line into the paragraph currently being
+// accumulated, opening the default-text paragraph lazily when no label is
+// active (BUG-001: one Text per paragraph).
 func (s *scanner) appendProse(line string) {
 	if s.target < 0 {
-		s.target = s.slot(s.defaultText(), Property{Role: RoleText, Default: true})
+		if !s.active {
+			s.predicate, s.textProp, s.active = s.defaultText(), Property{Role: RoleText, Default: true}, true
+		}
+		s.target = s.slot(s.predicate, s.textProp)
 	}
 	s.prose[s.target] = append(s.prose[s.target], line)
+}
+
+// closeParagraph finalises the paragraph currently being accumulated, if
+// any, into one Text entry. The active predicate (default or labelled)
+// stays in effect, so the next paragraph after a blank line reopens under
+// the same predicate (BUG-001).
+func (s *scanner) closeParagraph() {
+	if s.target < 0 {
+		return
+	}
+	if text := trimBlankLines(s.prose[s.target]); text != "" {
+		s.entries[s.target].values = []Object{Text(text)}
+	}
+	s.target = -1
 }
 
 func (s *scanner) defaultText() Predicate {
@@ -215,11 +277,7 @@ func (s *scanner) defaultText() Predicate {
 }
 
 func (s *scanner) finish() []entry {
-	for i, lines := range s.prose {
-		if text := trimBlankLines(lines); text != "" {
-			s.entries[i].values = []Object{Text(text)}
-		}
-	}
+	s.closeParagraph()
 	return s.entries
 }
 
@@ -265,6 +323,69 @@ func labelText(line string) (string, bool) {
 	}
 	text := line[2 : len(line)-2]
 	return text, !strings.Contains(text, "*") && strings.TrimSpace(text) == text
+}
+
+// boldLeadText recognises a paragraph lead "**Label**: rest", the inline
+// form of a bold label (BUG-001). A bold lead without a colon right after
+// the closing "**" is never a label, whatever the schema says.
+func boldLeadText(line string) (string, string, bool) {
+	if !strings.HasPrefix(line, "**") {
+		return "", "", false
+	}
+	tail := line[2:]
+	end := strings.Index(tail, "**")
+	if end <= 0 {
+		return "", "", false
+	}
+	label := tail[:end]
+	if strings.Contains(label, "*") || strings.TrimSpace(label) != label {
+		return "", "", false
+	}
+	rest, ok := strings.CutPrefix(tail[end+2:], ":")
+	if !ok {
+		return "", "", false
+	}
+	return label, strings.TrimSpace(rest), true
+}
+
+// untypedLinks scans text for bare [[Target]] / [[Target|display]] links
+// (CORE §7), skipping fenced code and the typed inline form
+// "[p:: [[T]]]" (BUG-001). A link whose target is not a valid ID is
+// silently dropped: it is a best-effort, derived view, not a triple.
+func untypedLinks(text string) []Ref {
+	var refs []Ref
+	fence := ""
+	for _, line := range strings.Split(text, "\n") {
+		switch {
+		case fence != "":
+			if closesFence(line, fence) {
+				fence = ""
+			}
+			continue
+		case fenceMarker(line) != "":
+			fence = fenceMarker(line)
+			continue
+		}
+		typed := inlineEdge.FindAllStringIndex(line, -1)
+		for _, m := range untypedLinkRe.FindAllStringIndex(line, -1) {
+			if withinAny(typed, m) {
+				continue
+			}
+			if o, err := parseRef(line[m[0]:m[1]]); err == nil {
+				refs = append(refs, o.(Ref))
+			}
+		}
+	}
+	return refs
+}
+
+func withinAny(spans [][]int, m []int) bool {
+	for _, s := range spans {
+		if m[0] >= s[0] && m[1] <= s[1] {
+			return true
+		}
+	}
+	return false
 }
 
 func fenceMarker(line string) string {

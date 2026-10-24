@@ -25,6 +25,9 @@
 | Codec | A configured encoder/decoder (schema and input limit). | `Codec`, `Config` |
 | Canonical form | The exact bytes the encoder produces; decoding then encoding a canonical file reproduces it byte for byte. | — |
 | Observed property | The `Property` implied by the position a predicate was found in while decoding; the encoder falls back to it when the schema is silent. | `Node.Property` |
+| Natural order | The order triples entered a node — document order on decode, call order to `NewNode` otherwise — kept within each CORE §4 section on encode; replaces a lexicographic canonical order for triples (BUG-001). | `Node.Triples`, `Node.Predicates`, `Node.Values` |
+| Paragraph | The unit of a text value; one paragraph, one `Text`, split at blank lines outside fenced code (BUG-001). | `Node.Values` on a `RoleText` predicate |
+| Untyped link | A bare `[[Target]]` inside a text value; part of that value, never a triple; exposed as a derived, read-only view (BUG-001). | `Node.Links` |
 
 ## Packages
 
@@ -41,9 +44,9 @@
 
 ### Hot paths
 
-Benchmarked by `BenchmarkDecode` and `BenchmarkEncode` in bench_test.go over `testdata/bench-100.md` (9.6 KB, 100 statements). Baseline on Apple M2 Pro, Go 1.27, 2026-10-23:
+Benchmarked by `BenchmarkDecode` and `BenchmarkEncode` in bench_test.go over `testdata/bench-100.md` (9.4 KB, 100 statements). Baseline on Apple M2 Pro, Go 1.27, 2026-10-24 (BUG-001: fixture's default prose merged into one paragraph to keep the statement count at 100 under natural order):
 
 | Path | Budget | ns/op | B/op | allocs/op |
 |---|---|---|---|---|
-| `Decode` | < 1 ms/op | 81 709 | 126 385 | 1 019 |
-| `Encode` | < 1 ms/op | 18 079 | 70 256 | 209 |
+| `Decode` | < 1 ms/op | 73 910 | 114 353 | 912 |
+| `Encode` | < 1 ms/op | 16 921 | 65 040 | 210 |

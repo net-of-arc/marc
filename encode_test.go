@@ -46,14 +46,17 @@ func coreSchema() marc.Properties {
 	}
 }
 
+// coreTriples lists the CORE §3 statements in the same order as
+// testdata/core-3-example.md: meta, then default text, then edges, then
+// the link block (BUG-001: encoding keeps natural, not canonical, order).
 func coreTriples() iter.Seq[marc.Triple] {
 	return slices.Values([]marc.Triple{
+		triple(tls, "category", marc.Text("script")),
+		triple(tls, "tags", marc.Text("cryptography")),
 		triple(tls, "text", marc.Text("A cryptographic protocol that establishes an authenticated, confidential channel over an untrusted network.")),
+		triple(tls, "conformsTo", ref("RFC 8446")),
 		triple(tls, "replaces", ref("SSL Protocol")),
 		triple(tls, "mentionedIn", ref("rescorla-2026-tls13")),
-		triple(tls, "tags", marc.Text("cryptography")),
-		triple(tls, "conformsTo", ref("RFC 8446")),
-		triple(tls, "category", marc.Text("script")),
 	})
 }
 
@@ -71,8 +74,8 @@ func TestEncodeCoreExample(t *testing.T) {
 	)
 }
 
-func TestEncodeSortedValues(t *testing.T) {
-	// Scenario 2.2 from specs/001-markdown-triples-codec/spec.md
+func TestEncodeInsertionOrderValues(t *testing.T) {
+	// Scenario 2.2 from specs/001-markdown-triples-codec/spec.md (BUG-001: natural, not lexicographic, order)
 	t.Parallel()
 
 	n := node(t, "X",
@@ -85,7 +88,7 @@ func TestEncodeSortedValues(t *testing.T) {
 	b, err := codec(t, schema).Marshal(n)
 
 	it.Then(t).Must(it.Nil(err)).Should(
-		it.Equal(string(b), "---\n\"@id\": X\n\"@type\": Entity\ntags: [alpha, mu, zeta]\n---\n# X\n"),
+		it.Equal(string(b), "---\n\"@id\": X\n\"@type\": Entity\ntags: [zeta, alpha, mu]\n---\n# X\n"),
 	)
 }
 
@@ -136,6 +139,28 @@ func TestEncodeLabelledProse(t *testing.T) {
 
 	it.Then(t).Must(it.Nil(err)).Should(
 		it.Equal(string(b), "---\n\"@id\": X\n\"@type\": Entity\n---\n# X\n\nDefault prose.\n\n**Key Findings**\nA finding.\n\n- replaces:: [[Y]]\n"),
+	)
+}
+
+func TestEncodeMultiParagraphText(t *testing.T) {
+	// Scenario 2.7 from specs/001-markdown-triples-codec/spec.md
+	t.Parallel()
+
+	n := node(t, "X",
+		triple("X", "text", marc.Text("abc")),
+		triple("X", "text", marc.Text("def")),
+		triple("X", "note", marc.Text("First.")),
+		triple("X", "note", marc.Text("Second.")),
+	)
+	schema := marc.Properties{
+		marc.MustPredicate("text"): {Role: marc.RoleText, Default: true},
+		marc.MustPredicate("note"): {Role: marc.RoleText},
+	}
+
+	b, err := codec(t, schema).Marshal(n)
+
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Equal(string(b), "---\n\"@id\": X\n\"@type\": Entity\n---\n# X\n\nabc\n\ndef\n\n**Note**\nFirst.\n\nSecond.\n"),
 	)
 }
 

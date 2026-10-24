@@ -80,10 +80,24 @@ func mustRoundTrip(t *testing.T, b []byte, err error) marc.Node {
 	return n
 }
 
+// equalTriples compares two nodes' triples as a set (BUG-001: a decoded
+// node's facts follow document order, which need not match the role-grouped
+// order the encoder reconstructs when re-decoded).
 func equalTriples(t *testing.T, a, b marc.Node) {
 	t.Helper()
-	ta, tb := slices.Collect(a.Triples()), slices.Collect(b.Triples())
+	ta, tb := sortedTriples(a), sortedTriples(b)
 	if !reflect.DeepEqual(ta, tb) {
 		t.Fatalf("triples differ:\n%v\n%v", ta, tb)
 	}
+}
+
+func sortedTriples(n marc.Node) []marc.Triple {
+	ts := slices.Collect(n.Triples())
+	slices.SortFunc(ts, func(a, b marc.Triple) int {
+		if c := strings.Compare(a.Predicate.String(), b.Predicate.String()); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Object.String(), b.Object.String())
+	})
+	return ts
 }

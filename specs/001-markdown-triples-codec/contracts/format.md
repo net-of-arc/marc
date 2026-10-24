@@ -4,21 +4,23 @@
 
 **Canonical file** := any byte sequence that `Encode` can produce.
 
+**Bugfix**: 2026-10-24 — BUG-001 natural order within sections; one paragraph per text value; `**Label**:` decoding
+
 ## 1. Layout
 
 ```text
 ---\n
 "@id": <scalar>\n
 "@type": <Class>\n
-<meta predicates, code-point order>\n
+<meta predicates, natural order (BUG-001; was code-point order)>\n
 "@conflicts":\n   (only if non-empty)
 "@provenance":\n  (only if non-empty)
 ---\n
 # <ID>\n
-[\n<default prose>\n]
-[\n**<Label>**\n<prose>\n]*           text predicates (non-default, non-Many), predicate order
-[\n- <p>:: [[<T>]]\n ...]             edge block: (predicate, value) order, one bullet per triple
-[\n## <Label>\n- <p>:: <value>\n ...]* link and Many-text blocks, predicate order
+[\n<paragraph>\n[\n<paragraph>\n]*]                    default prose: one paragraph per value, natural order (BUG-001)
+[\n**<Label>**\n<paragraph>\n[\n<paragraph>\n]*]*     text predicates (non-default, non-Many), natural order (BUG-001; was predicate order)
+[\n- <p>:: [[<T>]]\n ...]             edge block: natural triple order (BUG-001; was (predicate, value) order), one bullet per triple
+[\n## <Label>\n- <p>:: <value>\n ...]* link and Many-text blocks, natural order of predicates and values (BUG-001; was predicate order)
 ```
 
 - Line endings are `\n`, and the file ends with exactly one `\n`.
@@ -31,7 +33,7 @@
 | Value | Rendering |
 |---|---|
 | one value, `Many == false` | `key: <scalar>` |
-| `Many == true`, or more than one value | flow sequence `key: [<scalar>, <scalar>]`, values in canonical order |
+| `Many == true`, or more than one value | flow sequence `key: [<scalar>, <scalar>]`, values in ~~canonical~~ natural order (BUG-001) |
 | `Text` scalar | plain if reading it back yields the same `!!str` in both block and flow context: not empty, no leading or trailing space, no non-printable character, none of `: # , [ ] { } " ' ?` anywhere, no indicator (`- \| > ! & * % @` and backtick) at the start, not a YAML 1.1/1.2 boolean or null word (`true`, `yes`, `on`, `null`, `~`, … in any case), and, when it starts with a digit or one of `+ . ~ < =`, resolving to `!!str` (so `1`, `2026-10-23`, `.inf`, `<<` are quoted). Otherwise double-quoted with JSON-style escapes (`\"`, `\\`, `\n`, `\t`, `\r`, `\uXXXX`) |
 | `Number`, `Bool`, `Date`, `DateTime` | the variant's canonical rendering, unquoted |
 | `Ref` in meta | double-quoted `"[[Target]]"` |
@@ -45,6 +47,8 @@
 
 ## 4. Canonical order
 
+*(BUG-001: applies only to `@conflicts` and `@provenance`. Triples use natural order — the order they entered the node, document order on decode — within each §1 section; predicates by their first triple.)*
+
 - Predicates: by code point of the name.
 - Values of one predicate: by variant tag (`b < d < n < r < s < t`), then within a variant by value for `Date`/`DateTime`, by code point of the canonical rendering otherwise.
 
@@ -56,7 +60,9 @@ The decoder accepts the canonical file and these non-canonical inputs:
 |---|---|
 | `p:: [[T]]` line without a bullet (body form) | edge triple |
 | `[p:: [[T]]]` inside prose (inline form) | edge triple, with the prose kept verbatim |
-| `[[T]]` inside prose (untyped link) | nothing; stays in the prose |
+| `[[T]]` inside prose (untyped link) | nothing; stays in the prose (listed by `Node.Links`, BUG-001) |
+| a paragraph starting `**Label**: text` | labelled prose of that label; `text` (trimmed) starts its first paragraph (BUG-001) |
+| a paragraph starting `**Label** text` (no colon) | prose; not a label (BUG-001) |
 | `**Label**` followed by `- p:: …` bullets inside the edge block | a grouping label; ignored |
 | block-style YAML sequences, single-quoted scalars | the same values as the flow/double-quoted forms |
 | bare `@id:` key | accepted if the YAML parser reads it |
@@ -73,8 +79,8 @@ These are rejected: YAML anchors or aliases, nested maps outside `@conflicts`/`@
 |---|---|
 | front-matter scalar | `{Role: RoleMeta}` |
 | front-matter sequence | `{Role: RoleMeta, Many: true}` |
-| unlabelled paragraphs | `{Role: RoleText, Default: true}` on `Schema.Predicate(class, "")`, otherwise `text` |
-| `**Label**` + paragraph | `{Role: RoleText, Label: <label if ≠ derived>}` on `Schema.Predicate(class, label)`, otherwise the camelCase join of the label words |
+| unlabelled paragraphs | `{Role: RoleText, Default: true}` on `Schema.Predicate(class, "")`, otherwise `text`; one `Text` per paragraph (BUG-001) |
+| `**Label**` + paragraph(s), or `**Label**: ` paragraph lead (BUG-001) | `{Role: RoleText, Label: <label if ≠ derived>}` on `Schema.Predicate(class, label)`, otherwise the camelCase join of the label words; one `Text` per paragraph (BUG-001) |
 | edge-block bullet / body / inline form | `{Role: RoleEdge}` |
 | `## Label` block of `[[T]]` bullets | `{Role: RoleLink, Label: <heading if ≠ derived>}` |
 | `## Label` block of non-link bullets | `{Role: RoleText, Many: true, Label: <heading if ≠ derived>}` |
@@ -90,9 +96,9 @@ The encoder never drops a value. A value its predicate's role cannot represent i
 | Role | Rendered in the body | Moved to front-matter |
 |---|---|---|
 | `edge`, `link` | `Ref` values | every other variant |
-| `text`, not `Many`, one value | one `Text` that is non-blank, has no leading or trailing blank line and no `\r` | any other `Text`, every other variant |
-| `text` with `Many`, or `text` with more than one value | single-line, trimmed, non-empty `Text` not of the form `[[T]]`, as `## Label` statement bullets | any other `Text`, every other variant |
+| `text`, not `Many` ~~, one value~~ (BUG-001: any number of values) | each `Text` that is non-blank, has no leading or trailing blank line, no blank line outside fenced code (BUG-001) and no `\r`, as one paragraph | any other `Text`, every other variant |
+| `text` with `Many` ~~, or `text` with more than one value~~ (BUG-001) | single-line, trimmed, non-empty `Text` not of the form `[[T]]`, as `## Label` statement bullets | any other `Text`, every other variant |
 
-A body-renderable prose value that contains structure outside fenced code is rejected with `ErrProseStructure`: an ATX heading line (`#`…`######`), a `- p::` bullet, a typed body-form edge `p:: [[T]]`, a bold label line `**Label**`, or an unterminated fence.
+A body-renderable prose value that contains structure outside fenced code is rejected with `ErrProseStructure`: an ATX heading line (`#`…`######`), a `- p::` bullet, a typed body-form edge `p:: [[T]]`, a bold label line `**Label**`, a first line beginning with `**Label**:` (BUG-001), or an unterminated fence.
 
 A `Text` of the form `[[T]]` cannot be represented as text anywhere: it decodes as a `Ref`. Input that is not valid UTF-8 is rejected with `ErrMalformed`.

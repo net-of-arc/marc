@@ -44,7 +44,7 @@ func assemble(h header, entries []entry) Node {
 	for _, e := range h.conflicts {
 		addEntry(conflicts, e)
 	}
-	n.conflicts = conflicts.valueSets()
+	n.conflicts = conflicts.canonicalValueSets()
 	n.provenance = canonicalProvenance(h.provenance)
 	return n
 }

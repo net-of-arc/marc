@@ -55,10 +55,3 @@ jobs:
           git config user.email "github-actions@users.noreply.github.com"
           git tag ${{ steps.version.outputs.v-version }}
           git push origin ${{ steps.version.outputs.v-version }}
-
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          version: "~> v2"
-          args: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

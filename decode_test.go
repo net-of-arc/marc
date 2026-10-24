@@ -45,11 +45,31 @@ func TestDecodeCoreExample(t *testing.T) {
 		it.Equal(n.Class().String(), "Entity"),
 		it.Seq(slices.Collect(n.Triples())).Equal(
 			triple(tls, "category", marc.Text("script")),
-			triple(tls, "conformsTo", ref("RFC 8446")),
-			triple(tls, "mentionedIn", ref("rescorla-2026-tls13")),
-			triple(tls, "replaces", ref("SSL Protocol")),
 			triple(tls, "tags", marc.Text("cryptography")),
 			triple(tls, "text", marc.Text("A cryptographic protocol that establishes an authenticated, confidential channel over an untrusted network.")),
+			triple(tls, "conformsTo", ref("RFC 8446")),
+			triple(tls, "replaces", ref("SSL Protocol")),
+			triple(tls, "mentionedIn", ref("rescorla-2026-tls13")),
+		),
+	)
+}
+
+func TestDecodeNaturalOrder(t *testing.T) {
+	// Scenario 1.6 from specs/001-markdown-triples-codec/spec.md
+	t.Parallel()
+
+	src := "---\n\"@id\": X\n\"@type\": Entity\ntags: [zeta, alpha]\n---\n# X\n\n- replaces:: [[B]]\n- conformsTo:: [[A]]\n"
+	n, err := marc.Unmarshal([]byte(src))
+
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Seq(slices.Collect(n.Triples())).Equal(
+			triple("X", "tags", marc.Text("zeta")),
+			triple("X", "tags", marc.Text("alpha")),
+			triple("X", "replaces", ref("B")),
+			triple("X", "conformsTo", ref("A")),
+		),
+		it.Seq(slices.Collect(n.Predicates())).Equal(
+			marc.MustPredicate("tags"), marc.MustPredicate("replaces"), marc.MustPredicate("conformsTo"),
 		),
 	)
 }

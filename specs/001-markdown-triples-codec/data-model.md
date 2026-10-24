@@ -2,6 +2,8 @@
 
 **Feature**: [spec.md](spec.md) · **Research**: [research.md](research.md) · **API contract**: [contracts/api.md](contracts/api.md)
 
+**Bugfix**: 2026-10-24 — BUG-001 `facts` are an insertion-ordered set; one `Text` per paragraph; `Links()` derived view
+
 Every entity is an immutable value. Constructors validate; a non-zero value of every type is legal. Nothing here has a lifecycle or a state transition: the only "transition" is a pure function from one value to another (decode, encode).
 
 ## Entity map
@@ -10,7 +12,8 @@ Every entity is an immutable value. Constructors validate; a non-zero value of e
                   ┌──────────── Node ─────────────┐
                   │ id        ID                  │
                   │ class     Class               │
-                  │ facts     Predicate → {Object}│──── Triples() ──▶ iter.Seq[Triple]
+                  │ facts     [Triple] ordered set│──── Triples() ──▶ iter.Seq[Triple]
+                  │                               │──── Links() ────▶ iter.Seq2[Predicate, Ref]  (derived from Text values, BUG-001)
                   │ observed  Predicate → Property│
                   │ conflicts Predicate → [Object]│──── Conflicts() ─▶ iter.Seq2[Predicate, Object]
                   │ provenance [Attribution]      │──── Provenance() ▶ iter.Seq[Attribution]
@@ -66,6 +69,7 @@ Invariants:
 - The set of variants is closed (unexported sealing method `key()`).
 - A zero `Ref`, `Number`, `Date` or `DateTime` is rejected by `NewNode` with `ErrInvalidObject`.
 - `Text` values that come from front-matter are single-line; multi-line `Text` is prose.
+- A prose `Text` is one paragraph: it contains no blank line outside fenced code (BUG-001). A `Text` that does is not body-renderable and moves to front-matter (format.md §7).
 
 ### Triple
 
@@ -80,13 +84,15 @@ Invariants:
 |---|---|---|
 | `id` | the subject | non-zero |
 | `class` | the `@type` | non-zero |
-| `facts` | predicate → set of objects | set semantics by equality key (FR-006); no keyword predicates (`@id`, `@type`, `@conflicts`, `@provenance` cannot be expressed as `Predicate` because `@` fails camelCase) |
+| `facts` | ~~predicate → set of objects~~ insertion-ordered set of triples (BUG-001) | set semantics by equality key (FR-006), first occurrence keeps its position (FR-007); no keyword predicates (`@id`, `@type`, `@conflicts`, `@provenance` cannot be expressed as `Predicate` because `@` fails camelCase) |
 | `observed` | predicate → `Property` seen while decoding | empty for nodes built by `NewNode`; used by the encoder when the schema has no entry (FR-010, FR-017) |
 | `conflicts` | predicate → open alternatives | decode-only in this feature; written back verbatim in canonical order (FR-021) |
 | `provenance` | list of `Attribution` | decode-only in this feature; written back in canonical order (FR-021) |
 
 Behaviour:
-- `Triples()`, `Values(p)`, `Predicates()` iterate in canonical order (FR-007).
+- `Triples()`, `Values(p)`, `Predicates()` iterate in ~~canonical order~~ natural order: document order for a decoded node, insertion order for `NewNode`; predicates by their first triple (FR-007, BUG-001).
+- `Links()` yields `(predicate, Ref)` for every untyped `[[T]]` / `[[T|d]]` inside the node's `Text` values, in natural order, once per (predicate, target), skipping fenced code and inline typed edges `[p:: [[T]]]`. It is derived on demand and never stored as triples (FR-026, BUG-001).
+- `Conflicts()` and `Provenance()` keep canonical order (CORE §8.5).
 - `Values(p)` on an absent predicate yields nothing (Story 1, scenario 4).
 - A node is immutable after construction and safe for concurrent use. Iterators read shared state but never mutate it.
 

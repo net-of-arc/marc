@@ -32,13 +32,85 @@ func TestNewNodeSetSemantics(t *testing.T) {
 
 	it.Then(t).Must(it.Nil(err)).Should(
 		it.Seq(slices.Collect(n.Triples())).Equal(
-			tripleOf("X", "edge", RefTo(MustID("Y")).WithDisplay("first")),
-			tripleOf("X", "tags", Text("a")),
 			tripleOf("X", "tags", Text("b")),
+			tripleOf("X", "tags", Text("a")),
+			tripleOf("X", "edge", RefTo(MustID("Y")).WithDisplay("first")),
 		),
-		it.Seq(slices.Collect(n.Predicates())).Equal(MustPredicate("edge"), MustPredicate("tags")),
-		it.Seq(slices.Collect(n.Values(MustPredicate("tags")))).Equal(Text("a"), Text("b")),
+		it.Seq(slices.Collect(n.Predicates())).Equal(MustPredicate("tags"), MustPredicate("edge")),
+		it.Seq(slices.Collect(n.Values(MustPredicate("tags")))).Equal(Text("b"), Text("a")),
 	)
+}
+
+func TestNewNodeNaturalOrder(t *testing.T) {
+	// BUG-001: natural (insertion) order, deduplicated at first occurrence,
+	// grouped by predicate's first occurrence.
+	n, err := NewNode(MustID("X"), MustClass("Entity"), slices.Values([]Triple{
+		tripleOf("X", "tags", Text("zeta")),
+		tripleOf("X", "text", Text("b")),
+		tripleOf("X", "tags", Text("alpha")),
+		tripleOf("X", "text", Text("a")),
+		tripleOf("X", "tags", Text("zeta")),
+	}))
+
+	it.Then(t).Must(it.Nil(err)).Should(
+		it.Seq(slices.Collect(n.Triples())).Equal(
+			tripleOf("X", "tags", Text("zeta")),
+			tripleOf("X", "tags", Text("alpha")),
+			tripleOf("X", "text", Text("b")),
+			tripleOf("X", "text", Text("a")),
+		),
+		it.Seq(slices.Collect(n.Predicates())).Equal(MustPredicate("tags"), MustPredicate("text")),
+		it.Seq(slices.Collect(n.Values(MustPredicate("tags")))).Equal(Text("zeta"), Text("alpha")),
+	)
+}
+
+type linkPair struct {
+	Predicate Predicate
+	Target    string
+}
+
+func collectLinks(n Node) []linkPair {
+	var got []linkPair
+	for p, r := range n.Links() {
+		got = append(got, linkPair{p, r.Target().String()})
+	}
+	return got
+}
+
+func TestNodeLinks(t *testing.T) {
+	n, err := NewNode(MustID("X"), MustClass("Entity"), slices.Values([]Triple{
+		tripleOf("X", "text", Text("See [[A]] and [[B|shown]], then [[A]] again.")),
+		tripleOf("X", "note", Text("Also [[C]].")),
+		tripleOf("X", "claims", Text("fenced\n```\n[[D]]\n```\nand [typed:: [[E]]] stays out")),
+	}))
+	it.Then(t).Must(it.Nil(err))
+
+	it.Then(t).Should(it.Seq(collectLinks(n)).Equal(
+		linkPair{MustPredicate("text"), "A"},
+		linkPair{MustPredicate("text"), "B"},
+		linkPair{MustPredicate("note"), "C"},
+	))
+}
+
+func TestNodeLinksEmpty(t *testing.T) {
+	n, err := NewNode(MustID("X"), MustClass("Entity"), slices.Values([]Triple{
+		tripleOf("X", "replaces", RefTo(MustID("Y"))),
+	}))
+	it.Then(t).Must(it.Nil(err)).Should(it.Seq(collectLinks(n)).BeEmpty())
+}
+
+func TestNodeLinksStopEarly(t *testing.T) {
+	n, err := NewNode(MustID("X"), MustClass("Entity"), slices.Values([]Triple{
+		tripleOf("X", "text", Text("[[A]] [[B]] [[C]]")),
+	}))
+	it.Then(t).Must(it.Nil(err))
+
+	count := 0
+	for range n.Links() {
+		count++
+		break
+	}
+	it.Then(t).Should(it.Equal(count, 1))
 }
 
 func TestNewNodeRejects(t *testing.T) {

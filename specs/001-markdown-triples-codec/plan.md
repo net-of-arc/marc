@@ -4,6 +4,8 @@
 
 **Input**: Feature specification from `/specs/001-markdown-triples-codec/spec.md`
 
+**Bugfix**: 2026-10-24 — BUG-001 Updated from bugfix patch (natural order, paragraph-per-value text, `**Label**:` decoding, derived untyped-link view)
+
 **Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
 It is the project override of the core plan template and enforces `.specify/memory/constitution.md`.
 
@@ -17,10 +19,11 @@ Deliver the root package `marc` as a pure, side-effect-free codec between one Ar
   - `Object` is a **sealed-interface sum type** with the variants `Ref`, `Text`, `Number`, `Bool`, `Date` and `DateTime`, plus the generic `Select[T]` for typed filtering (research R1).
   - `Triple` is a plain struct.
   - `Node` is immutable and is iterated with `iter.Seq[Triple]`, `iter.Seq[Object]` and `iter.Seq[Predicate]`.
+  - *(BUG-001)* `Node` keeps triples in **natural order** (document order on decode, insertion order for `NewNode`), deduplicated with the first occurrence winning; the encoder writes that order within each CORE §4 section. Canonical order (`compareObjects`) remains only for `@conflicts`/`@provenance`. Untyped links in text values are exposed by `Node.Links() iter.Seq2[Predicate, Ref]`, a derived view, never triples (FR-026).
   - Placement is driven by a **consumer-owned `Schema` interface** (`Property(Class, Predicate)` and `Predicate(Class, label)`) that returns `Property` and `Role` values; `Properties` is the reference map implementation (research R4).
 - **Parsing.**
   - Front-matter is read with `go.yaml.in/yaml/v3` and written by hand to canonical rules ([contracts/format.md](contracts/format.md)).
-  - The body uses a line scanner.
+  - The body uses a line scanner. *(BUG-001)* It splits prose into one `Text` per paragraph (blank lines outside fences) and reads a `**Label**:` paragraph lead as a label.
   - NFC normalisation uses `golang.org/x/text`.
 - **CI/CD.** GitHub Actions adapted from fogfish/arcnet-cli (`build`, `check-code`, `check-test`) and extended to the constitution's mandatory tooling (research R11).
 
@@ -39,7 +42,7 @@ Deliver the root package `marc` as a pure, side-effect-free codec between one Ar
 **Public API Surface**: as listed in full in [contracts/api.md](contracts/api.md) (Principle IX):
 - **Names**: `ID`, `Predicate`, `Class` with `New*`/`Must*`.
 - **Object**: `Object` (sealed); `Ref` + `RefTo`; `Text`; `Number` + `ParseNumber`; `Bool`; `Date` + `DateOf`; `DateTime` + `DateTimeOf`; `Select[T]`.
-- **Bag**: `Triple`, `Attribution`, `Node` + `NewNode`.
+- **Bag**: `Triple`, `Attribution`, `Node` + `NewNode`; `Node.Links` (BUG-001, FR-026).
 - **Placement**: `Role` (`RoleMeta`/`RoleText`/`RoleEdge`/`RoleLink`), `Property` (value struct), `Schema` (consumer-implemented interface), `Properties` (reference implementation with `Validate`).
 - **Codec**: `Config{Schema; MaxSize}` (zero means no schema and a 4 MiB limit); `Codec` + `New`; package-level `Decode`/`Unmarshal`/`Encode`/`Marshal`.
 - **Errors**: 10 `faults.Type` constants (`ErrMalformed`, `ErrIdentityMismatch`, `ErrInvalidID`, `ErrInvalidName`, `ErrInvalidObject`, `ErrForeignSubject`, `ErrTooLarge`, `ErrProseStructure`, `ErrInvalidProperty`, `ErrInvalidConfig`).
@@ -87,6 +90,14 @@ The design artifacts ([data-model.md](data-model.md), [contracts/api.md](contrac
 - **Principles V, IX (review feedback)**: `Schema` changed from a library-owned `map[Predicate]Property` to a consumer-implemented, class-keyed interface, because applications own their vocabulary. `Property` stays a value struct, and `Properties` is the reference implementation. As a side effect, the "one `Codec` per class" limitation disappears. Whole-schema validation can no longer run in `New`; it moves to per-`Property` checks at use and to `Properties.Validate`. This is recorded in ADR 003 §4.
 
 All gates remain PASS (conditional on the ADRs).
+
+### Bugfix re-check (BUG-001, 2026-10-24)
+
+- **Principle V/IX**: one exported method is added, `Node.Links`, traced to FR-026 / Story 4 in [contracts/api.md](contracts/api.md).
+- **Principle XIV**: iteration and encoding order change from canonical to natural, and multiple text values now render as paragraphs instead of `## Label` bullets. Pre-release (no tag), so this is not a compatibility event; it is recorded in the GoDoc of `Node` and `Encode`.
+- **Principle XI**: the ordered builder keeps the dedup map plus one slice in insertion order; no new allocation class on the hot path.
+
+All gates remain PASS.
 
 ## Project Structure
 
@@ -151,4 +162,5 @@ specs/001-markdown-triples-codec/
 | Violation | Principle | Why Needed | Simpler Alternative Rejected Because | ADR |
 |-----------|-----------|------------|-------------------------------------|-----|
 | Two third-party runtime dependencies | VII | YAML front-matter parsing and Unicode NFC are required by CORE and absent from the standard library | A hand-written YAML subset parser is a large attack surface that diverges from other graph tools; skipping NFC violates CORE §5 | [ADR 002](../../adrs/002-runtime-dependencies.md) |
+| Natural (insertion) order replaces lexicographic canonical order for triples (BUG-001) | XIV (determinism) | The client's document order is meaningful to readers; CORE §3 requires only a stable order | Lexicographic order reshuffles paragraphs and bullets, losing the order the author wrote | — |
 | Codec functions take no `context.Context` | IX (interpretation) | Pure transformation over caller-owned, size-bounded input; nothing to cancel | Adding `ctx` diverges from `encoding/json` idiom without adding behaviour | [ADR 003](../../adrs/003-public-api-shape.md) |

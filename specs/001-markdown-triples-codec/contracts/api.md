@@ -95,15 +95,18 @@ func NewNode(id ID, class Class, triples iter.Seq[Triple]) (Node, error)
     // Consumes triples once; retains no reference to the sequence. Duplicates collapse (set).
 func (n Node) ID() ID
 func (n Node) Class() Class
-func (n Node) Triples() iter.Seq[Triple]                 // canonical order
-func (n Node) Predicates() iter.Seq[Predicate]           // canonical order
-func (n Node) Values(p Predicate) iter.Seq[Object]       // canonical order; empty if absent
+func (n Node) Triples() iter.Seq[Triple]                 // natural order (BUG-001; was canonical)
+func (n Node) Predicates() iter.Seq[Predicate]           // natural order: by first triple (BUG-001; was canonical)
+func (n Node) Values(p Predicate) iter.Seq[Object]       // natural order; empty if absent (BUG-001; was canonical)
+func (n Node) Links() iter.Seq2[Predicate, Ref]          // untyped [[T]] in Text values; derived, not triples (BUG-001, FR-026)
 func (n Node) Property(p Predicate) (Property, bool)     // as observed while decoding
 func (n Node) Conflicts() iter.Seq2[Predicate, Object]   // @conflicts, flattened
 func (n Node) Provenance() iter.Seq[Attribution]         // @provenance, flattened
 ```
 
 `Node` is immutable and safe for concurrent use; the zero `Node` is invalid and the encoder rejects it with `ErrMalformed`.
+
+*Natural order* (BUG-001): the order triples entered the node — document order on decode, `NewNode` sequence order otherwise — with duplicates keeping their first position. `Conflicts` and `Provenance` stay in canonical order.
 
 ## Rendering rules — `schema.go`
 
@@ -201,6 +204,7 @@ Clients match errors with `errors.Is` only.
 | Story 2 / FR-008, 016–019 | `NewNode`, `Encode`, `Marshal`, `Schema`, `Properties`, `Property`, `Role` |
 | Story 3 / FR-010, 012, 022, 023 | `Node.Property`, observed properties, canonical encoder |
 | Story 4 / FR-011 | `Text` prose values |
+| Story 4 / FR-026 (BUG-001) | `Node.Links` |
 | Story 5 / FR-002, 003, 014, 015, 020, 024 | `NewID`, `NewPredicate`, `NewClass`, `Config.MaxSize`, error constants |
 | Story 6 / FR-005, 021 | `Node.Conflicts`, `Node.Provenance`, `Attribution` |
 
@@ -212,4 +216,4 @@ Each rule below must appear in the GoDoc of the identifier it concerns (Principl
 - `NewNode` consumes the triple sequence exactly once and retains no reference to it.
 - `Unmarshal` (package function and method) does not retain its `[]byte` argument; `Decode` does not retain the reader.
 - `Codec` keeps `Config.Schema` by reference, never copies or mutates it, and is safe for concurrent use when the schema is.
-- `Node` iterators (`Triples`, `Predicates`, `Values`, `Conflicts`, `Provenance`) yield copies of immutable values; the caller cannot mutate the node through them.
+- `Node` iterators (`Triples`, `Predicates`, `Values`, `Links`, `Conflicts`, `Provenance`) yield copies of immutable values; the caller cannot mutate the node through them.

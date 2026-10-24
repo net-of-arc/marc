@@ -127,6 +127,8 @@ Recorded in [ADR 002](../../adrs/002-runtime-dependencies.md).
 
 **Alternatives considered**: `github.com/yuin/goldmark` (rejected: lossy for round trip, a dependency); a regex-only approach (rejected: fenced-code state needs a scanner anyway).
 
+**Revision (BUG-001, 2026-10-24)**: the scanner closes a prose value at each blank line outside a fence, so every paragraph is its own `Text`. A paragraph whose first line starts with `**Label**:` opens labelled prose for that label, as an own-line `**Label**` does, and the rest of the line (trimmed) begins its first paragraph. A bold lead without a colon stays prose; the schema is not consulted for this decision. Untyped `[[T]]` links are found by a fence-aware scan of the text values that skips inline typed edges `[p:: [[T]]]`; the result is a derived view (`Node.Links`), not triples.
+
 ---
 
 ## R7. Unicode NFC normalisation
@@ -158,6 +160,13 @@ Recorded in [ADR 002](../../adrs/002-runtime-dependencies.md).
   - when the same predicate holds values of mixed variants, they are ordered by variant tag first.
 
 **Rationale**: This follows CORE §8.5 directly and makes `Node.Triples()` deterministic (FR-007, FR-018).
+
+**Revision (BUG-001, 2026-10-24)** — supersedes the *Prose* and *Canonical order* bullets above for triples:
+- **Prose**: ~~one `Text` value holding all paragraphs~~ → one `Text` per paragraph. The blob existed only to keep paragraph order inside a sorted set; with natural order it is unnecessary. Paragraph equality is unchanged (the `Text` key), so a repeated paragraph collapses to its first occurrence (CORE §8.4 `append`: "every paragraph not yet present").
+- **Order**: ~~canonical order~~ → **natural order**: triples keep the order they entered the node (document order on decode, insertion order for `NewNode`); predicates are ordered by their first triple. The encoder writes that order within each CORE §4 section. CORE §3 asks only for a *stable* order, and natural order is stable: encoding the same node twice gives the same bytes.
+- **Canonical order** (`compareObjects`, `compareAttributions`) is kept only for `@conflicts` and `@provenance`, which are merge state, not attributes.
+
+**Alternatives considered (BUG-001)**: keep canonical order and add a separate "document order" iterator (rejected: two orders for one bag, and the encoder would still reshuffle the author's order); order only text values (rejected: the reader expects edges and meta values in the order written as well).
 
 ---
 
